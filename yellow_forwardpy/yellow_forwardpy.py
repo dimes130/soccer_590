@@ -124,10 +124,110 @@ def get_lidar_sector(distances, sector='front'):
     readings = sectors.get(sector, [])
     return min((d for d in readings if not math.isinf(d)), default=float('inf'))
 
+def PushBallForward(info):
+    if info.yellow_count == 0:
+        # ---- SEARCH FOR BALL ----
+        info.leftSpeed  = 0.5 * MAX_SPEED
+        info.rightSpeed = -0.5 * MAX_SPEED
+
+    if info.yellow_count > 1:
+        # ---- CHARGE OPPONENT ----
+        avg_x = info.yellow_x_sum / info.yellow_count #average x coord of yellow pixels
+        if avg_x < cam_width * 0.4:
+            info.leftSpeed  = 0.5 * MAX_SPEED
+            info.rightSpeed = MAX_SPEED
+        elif avg_x > cam_width * 0.6:
+            info.leftSpeed  = MAX_SPEED
+            info.rightSpeed = 0.5 * MAX_SPEED
+        else:
+            info.leftSpeed  = MAX_SPEED
+            info.rightSpeed = MAX_SPEED
+
+class SoccerRobot:
+    def __init__(self):
+        self.leftSpeed = 0.0
+        self.rightSpeed = 0.0
+        self.distances = []
+        self.ballXPos = 0.0
+        self.canSeeBall = False
+
+    def getBallPosition(self):
+        image = camera.getImage()
+        yellow_x_sum = 0
+        yellow_count = 0
+        for y in range(cam_height):
+            for x in range(cam_width):
+                r = Camera.imageGetRed(image, cam_width, x, y)
+                g = Camera.imageGetGreen(image, cam_width, x, y)
+                b = Camera.imageGetBlue(image, cam_width, x, y)
+                if is_yellow(r, g, b):
+                    yellow_x_sum += x
+                    yellow_count += 1
+                
+        if yellow_count > 0:
+            # if the ball is on screen, update the ballXPos
+            print("ball detected, setting ballXPos")
+            self.canSeeBall = True
+            self.ballXPos = yellow_x_sum / yellow_count
+        else: 
+            # if the ball is not on screen, don't touch the ballXPos
+            # this keeps the last x position of the ball so the robot knows which way to spin
+            self.canSeeBall = False
+
+    def faceBall(self):
+        #Face the ball and stop
+        while robot.step(TIME_STEP) != -1:
+            self.getBallPosition()
+
+            #printing to see what the robot is "thinking"
+            if self.canSeeBall:
+                print("ball detected, facing ball")
+            else:
+                print("searching for ball")
+
+            if self.ballXPos < cam_width * 0.4: #the .4 and .6 are to create a deadzone so the camera doesn't jitter back and forth
+                # if the ball is to the left of the robot, or if the last known position is to the left, turn left
+                self.leftSpeed  = -0.5 * MAX_SPEED
+                self.rightSpeed = 0.5 * MAX_SPEED
+            elif self.ballXPos > cam_width * 0.6:
+                #if the ball is to the right of the robot, or if the last known position is to the right, turn right
+                self.leftSpeed  = 0.5 * MAX_SPEED
+                self.rightSpeed = -0.5 * MAX_SPEED
+            elif self.canSeeBall:
+                #if the ball is centered on the screen, stop and return control to the main loop
+                print("ball centered, stopping")
+                self.leftSpeed  = 0.0
+                self.rightSpeed = 0.0
+                self.setSpeed()
+                return
+            else:
+                # edge case for if you cant see the ball and the last known position was centered
+                if self.leftSpeed == 0 and self.rightSpeed == 0:
+                    self.leftSpeed  = 0.5 * MAX_SPEED
+                    self.rightSpeed = -0.5 * MAX_SPEED
+            self.setSpeed()
+
+    def getDistances(self):
+        self.distances = get_lidar_distances()
+
+    def setSpeed(self):
+        set_speed(self.leftSpeed, self.rightSpeed)
+
 # ------------------ MAIN LOOP ------------------
+soccerRobot = SoccerRobot()
 while robot.step(TIME_STEP) != -1:
-    leftSpeed = 0.0
-    rightSpeed = 0.0
+    soccerRobot.faceBall()
+
+'''
+
+while robot.step(TIME_STEP) != -1:
+    soccerRobot.getBallPosition()
+
+    #PushBallForward(robot)
+    #face_ball(robot)
+    soccerRobot.faceBall()
+
+    soccerRobot.setSpeed()
 
     # ================= LIDAR READING =================
     # Get all distance readings from the lidar this timestep
@@ -151,11 +251,12 @@ while robot.step(TIME_STEP) != -1:
     
     for y in range(cam_height // 2, cam_height, 2):
         for x in range(0, cam_width, 2):
+            #get RGB values for this pixel
             r = Camera.imageGetRed(image, cam_width, x, y)
             g = Camera.imageGetGreen(image, cam_width, x, y)
             b = Camera.imageGetBlue(image, cam_width, x, y)
-            
-            if is_yellow(r, g, b):
+            if is_yellow(r, g, b): 
+                #Adds all the x coords of yellow pixels together and counts how many yellow pixels there are
                 yellow_x_sum += x
                 yellow_count += 1
             if is_magenta(r, g, b):
@@ -222,3 +323,5 @@ while robot.step(TIME_STEP) != -1:
         rightSpeed = 0.4 * MAX_SPEED
         
     set_speed(leftSpeed, rightSpeed)
+
+'''
