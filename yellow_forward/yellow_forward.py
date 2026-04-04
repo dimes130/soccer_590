@@ -150,6 +150,47 @@ class SoccerRobot:
         self.distances = []
         self.ballXPos = 0.0
         self.canSeeBall = False
+    
+    def getObjectPosition(self, color_fn):
+        image = camera.getImage()
+        x_sum = 0
+        count = 0
+
+        for y in range(cam_height):
+            for x in range(cam_width):
+                r = Camera.imageGetRed(image, cam_width, x, y)
+                g = Camera.imageGetGreen(image, cam_width, x, y)
+                b = Camera.imageGetBlue(image, cam_width, x, y)
+
+                if color_fn(r, g, b):
+                    x_sum += x
+                    count += 1
+
+        if count > 0:
+            return x_sum / count, True
+        else:
+            return None, False
+
+    def faceObject(self, color_fn):
+        obj_x, seen = self.getObjectPosition(color_fn)
+
+        if seen and obj_x is not None:
+            if obj_x < cam_width * 0.4:
+                self.leftSpeed  = -0.5 * MAX_SPEED
+                self.rightSpeed = 0.5 * MAX_SPEED
+
+            elif obj_x > cam_width * 0.6:
+                self.leftSpeed  = 0.5 * MAX_SPEED
+                self.rightSpeed = -0.5 * MAX_SPEED
+
+            else:
+                # centered
+                self.leftSpeed  = 0.0
+                self.rightSpeed = 0.0
+        else:
+            # search
+            self.leftSpeed  = 0.5 * MAX_SPEED
+            self.rightSpeed = -0.5 * MAX_SPEED
 
     def getBallPosition(self):
         image = camera.getImage()
@@ -207,6 +248,14 @@ class SoccerRobot:
                     self.rightSpeed = -0.5 * MAX_SPEED
             self.setSpeed()
 
+    def faceOpponentGoal(self):
+        print("Facing opponent goal (cyan)")
+        self.faceObject(is_cyan)
+
+    def faceOwnGoal(self):
+        print("Facing own goal (magenta)")
+        self.faceObject(is_magenta)
+
     def getDistances(self):
         self.distances = get_lidar_distances()
 
@@ -222,7 +271,6 @@ while robot.step(TIME_STEP) != -1:
 
 while robot.step(TIME_STEP) != -1:
     soccerRobot.getBallPosition()
-
     #PushBallForward(robot)
     #face_ball(robot)
     soccerRobot.faceBall()
