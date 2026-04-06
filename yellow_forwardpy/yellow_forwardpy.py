@@ -125,6 +125,7 @@ def get_lidar_sector(distances, sector='front'):
     return min((d for d in readings if not math.isinf(d)), default=float('inf'))
 
 def PushBallForward(info):
+    print("Pushing ball forward")
     if info.yellow_count == 0:
         # ---- SEARCH FOR BALL ----
         info.leftSpeed  = 0.5 * MAX_SPEED
@@ -150,6 +151,25 @@ class SoccerRobot:
         self.distances = []
         self.ballXPos = 0.0
         self.canSeeBall = False
+
+    def pushBallForward(self):
+        print("Pushing ball forward")
+        if self.canSeeBall == 0:
+            # ---- SEARCH FOR BALL ----
+            self.leftSpeed  = 0.5 * MAX_SPEED
+            self.rightSpeed = -0.5 * MAX_SPEED
+
+        if self.yellow_count > 1:
+            # ---- CHARGE OPPONENT ----
+            if self.ballXPos < cam_width * 0.4:
+                self.leftSpeed  = 0.5 * MAX_SPEED
+                self.rightSpeed = MAX_SPEED
+            elif self.ballXPos > cam_width * 0.6:
+                self.leftSpeed  = MAX_SPEED
+                self.rightSpeed = 0.5 * MAX_SPEED
+            else:
+                self.leftSpeed  = MAX_SPEED
+                self.rightSpeed = MAX_SPEED
 
     def getBallPosition(self):
         image = camera.getImage()
@@ -216,7 +236,9 @@ class SoccerRobot:
 # ------------------ MAIN LOOP ------------------
 soccerRobot = SoccerRobot()
 while robot.step(TIME_STEP) != -1:
-    soccerRobot.faceBall()
+    soccerRobot.getBallPosition()
+    soccerRobot.pushBallForward()
+    soccerRobot.setSpeed()
 
 '''
 
