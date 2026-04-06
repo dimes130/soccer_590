@@ -3,6 +3,8 @@ import math
 
 TIME_STEP = 64
 MAX_SPEED = 10
+TURN_STEPS = 20   # tune this to control how many degrees it turns
+STRAIGHT_STEPS = 30  # tune this to control how far it drives past the ball
 
 robot = Robot()
 
@@ -150,6 +152,9 @@ class SoccerRobot:
         self.distances = []
         self.ballXPos = 0.0
         self.canSeeBall = False
+        self.bypass_done = False
+        self.circle_direction = None
+        self.v_step = 0
     
     def getObjectPosition(self, color_fn):
         image = camera.getImage()
@@ -216,37 +221,25 @@ class SoccerRobot:
             self.canSeeBall = False
 
     def faceBall(self):
-        #Face the ball and stop
-        while robot.step(TIME_STEP) != -1:
-            self.getBallPosition()
-
-            #printing to see what the robot is "thinking"
-            if self.canSeeBall:
-                print("ball detected, facing ball")
-            else:
-                print("searching for ball")
-
-            if self.ballXPos < cam_width * 0.4: #the .4 and .6 are to create a deadzone so the camera doesn't jitter back and forth
-                # if the ball is to the left of the robot, or if the last known position is to the left, turn left
-                self.leftSpeed  = -0.5 * MAX_SPEED
-                self.rightSpeed = 0.5 * MAX_SPEED
-            elif self.ballXPos > cam_width * 0.6:
-                #if the ball is to the right of the robot, or if the last known position is to the right, turn right
-                self.leftSpeed  = 0.5 * MAX_SPEED
-                self.rightSpeed = -0.5 * MAX_SPEED
-            elif self.canSeeBall:
-                #if the ball is centered on the screen, stop and return control to the main loop
-                print("ball centered, stopping")
-                self.leftSpeed  = 0.0
-                self.rightSpeed = 0.0
-                self.setSpeed()
-                return
-            else:
-                # edge case for if you cant see the ball and the last known position was centered
-                if self.leftSpeed == 0 and self.rightSpeed == 0:
-                    self.leftSpeed  = 0.5 * MAX_SPEED
-                    self.rightSpeed = -0.5 * MAX_SPEED
-            self.setSpeed()
+        self.getBallPosition()
+    
+        if self.ballXPos < cam_width * 0.4:
+            self.leftSpeed  = -0.5 * MAX_SPEED
+            self.rightSpeed = 0.5 * MAX_SPEED
+    
+        elif self.ballXPos > cam_width * 0.6:
+            self.leftSpeed  = 0.5 * MAX_SPEED
+            self.rightSpeed = -0.5 * MAX_SPEED
+    
+        elif self.canSeeBall:
+            # centered
+            self.leftSpeed  = 0.0
+            self.rightSpeed = 0.0
+    
+        else:
+            # searching
+            self.leftSpeed  = 0.5 * MAX_SPEED
+            self.rightSpeed = -0.5 * MAX_SPEED
 
     def faceOpponentGoal(self):
         print("Facing opponent goal (cyan)")
@@ -261,115 +254,150 @@ class SoccerRobot:
 
     def setSpeed(self):
         set_speed(self.leftSpeed, self.rightSpeed)
+    
+    def driveForwardTimed(self, steps=60):
+        self.v_step += 1
+    
+        self.leftSpeed  = 0.7 * MAX_SPEED
+        self.rightSpeed = 0.7 * MAX_SPEED
+    
+        if self.v_step >= steps:
+            self.v_step = 0
+            return True
+    
+        return False
+        
+    def repositionAroundBall(self):
+        """
+        Simple bypass:
+        1. Slight turn away from ball
+        2. Drive forward past it
+        3. Done
+        """
+    
+        self.v_step += 1
+    
+        # decide direction ONCE
+        if self.v_step == 1:
+            if self.ballXPos < cam_width / 2:
+                self.circle_direction = "left"
+            else:
+                self.circle_direction = "right"
+    
+        TURN_TIME = 10
+        FORWARD_TIME = 25
+    
+        # -------- Phase 1: slight turn --------
+        if self.v_step <= TURN_TIME:
+            if self.circle_direction == "left":
+                self.leftSpeed  = -0.3 * MAX_SPEED
+                self.rightSpeed =  0.6 * MAX_SPEED
+            else:
+                self.leftSpeed  =  0.6 * MAX_SPEED
+                self.rightSpeed = -0.3 * MAX_SPEED
+    
+        # -------- Phase 2: drive forward --------
+        elif self.v_step <= TURN_TIME + FORWARD_TIME:
+            self.leftSpeed  = 0.7 * MAX_SPEED
+            self.rightSpeed = 0.7 * MAX_SPEED
+    
+        # -------- Done --------
+        else:
+            self.v_step = 0
+            self.circle_direction = None
+            return True
+    
+        return False
+
 
 # ------------------ MAIN LOOP ------------------
 soccerRobot = SoccerRobot()
-while robot.step(TIME_STEP) != -1:
-    soccerRobot.faceBall()
 
-'''
+state = "SEARCH"
+soccerRobot.v_step = 0
 
 while robot.step(TIME_STEP) != -1:
+
+    # always update vision (safe)
     soccerRobot.getBallPosition()
-    #PushBallForward(robot)
-    #face_ball(robot)
-    soccerRobot.faceBall()
 
-    soccerRobot.setSpeed()
-
-    # ================= LIDAR READING =================
-    # Get all distance readings from the lidar this timestep
-    distances = get_lidar_distances()
-
-    # Example: read the closest obstacle distance straight ahead
-    front_dist = get_lidar_sector(distances, 'front')
-
-    # Example: stop if something is within 0.2 meters in front
-    # if front_dist < 0.2:
-    #     set_speed(0, 0)
-    #     continue
-
-    # ================= YELLOW DETECTION =================
-    image = camera.getImage()
-    yellow_x_sum = 0
-    yellow_count = 0
-    magenta_count = 0
-    cyan_count = 0
-    cyan_x_sum = 0
-    
-    for y in range(cam_height // 2, cam_height, 2):
-        for x in range(0, cam_width, 2):
-            #get RGB values for this pixel
-            r = Camera.imageGetRed(image, cam_width, x, y)
-            g = Camera.imageGetGreen(image, cam_width, x, y)
-            b = Camera.imageGetBlue(image, cam_width, x, y)
-            if is_yellow(r, g, b): 
-                #Adds all the x coords of yellow pixels together and counts how many yellow pixels there are
-                yellow_x_sum += x
-                yellow_count += 1
-            if is_magenta(r, g, b):
-                magenta_count += 1
-            if is_cyan(r, g, b):
-                cyan_count += 1
-                cyan_x_sum += x
-    
-    if yellow_count > 10:
-        ball_x = yellow_x_sum / yellow_count
-    
-    else:
-        ball_x = None
-    
-    if cyan_count > 10:
-        goal_x = cyan_x_sum / cyan_count
-    else:
-        goal_x = None
-        
-    if ball_x is not None:
-
-    # BAD POSITION: goal behind ball
-        robot_center = cam_width / 2
-
-        if goal_x is not None:
-        
-            # goal and ball on same side of robot → bad position
-            if (goal_x < robot_center and ball_x < robot_center) or \
-               (goal_x > robot_center and ball_x > robot_center):
-        
-                # circle around ball
-                leftSpeed = 0.5 * MAX_SPEED
-                rightSpeed = -0.3 * MAX_SPEED
-        
-            else:
-                # good position → push ball
-                if ball_x < cam_width * 0.4:
-                    leftSpeed = 0.5 * MAX_SPEED
-                    rightSpeed = MAX_SPEED
-        
-                elif ball_x > cam_width * 0.6:
-                    leftSpeed = MAX_SPEED
-                    rightSpeed = 0.5 * MAX_SPEED
-        
-                else:
-                    leftSpeed = MAX_SPEED
-                    rightSpeed = MAX_SPEED
-            
+    # ---------------- SEARCH ----------------
+    if state == "SEARCH":
+        if soccerRobot.canSeeBall:
+            print("STATE → APPROACH")
+            state = "APPROACH"
         else:
-            # normal ball chasing
-            if ball_x < cam_width * 0.4:
-                leftSpeed = 0.5 * MAX_SPEED
-                rightSpeed = MAX_SPEED
-    
-            elif ball_x > cam_width * 0.6:
-                leftSpeed = MAX_SPEED
-                rightSpeed = 0.5 * MAX_SPEED
-    
-            else:
-                leftSpeed = MAX_SPEED
-                rightSpeed = MAX_SPEED
-    else:
-        leftSpeed  = -0.4 * MAX_SPEED
-        rightSpeed = 0.4 * MAX_SPEED
-        
-    set_speed(leftSpeed, rightSpeed)
+            soccerRobot.leftSpeed  = 0.5 * MAX_SPEED
+            soccerRobot.rightSpeed = -0.5 * MAX_SPEED
 
-'''
+    # ---------------- APPROACH ----------------
+    elif state == "APPROACH":
+        if not soccerRobot.canSeeBall:
+            print("Lost ball → SEARCH")
+            state = "SEARCH"
+
+        else:
+            ball_x = soccerRobot.ballXPos
+
+            if ball_x < cam_width * 0.45:
+                soccerRobot.leftSpeed  = 0.3 * MAX_SPEED
+                soccerRobot.rightSpeed = MAX_SPEED
+
+            elif ball_x > cam_width * 0.55:
+                soccerRobot.leftSpeed  = MAX_SPEED
+                soccerRobot.rightSpeed = 0.3 * MAX_SPEED
+
+            else:
+                # move forward slowly
+                soccerRobot.leftSpeed  = 0.5 * MAX_SPEED
+                soccerRobot.rightSpeed = 0.5 * MAX_SPEED
+
+                # centered → start bypass
+                if cam_width * 0.47 < ball_x < cam_width * 0.53:
+                    print("STATE → ORBIT (BYPASS)")
+                    soccerRobot.v_step = 0
+                    state = "ORBIT"
+
+    # ---------------- ORBIT (LOCKED BYPASS) ----------------
+    #Ignore functions the orbit functions in soccerRobot
+    elif state == "ORBIT":
+        soccerRobot.v_step += 1
+
+        # 🔥 slight curve forward (prevents hitting ball)
+
+        # ignore vision completely during this phase
+        if soccerRobot.v_step < 40 and soccerRobot.v_step >= 20:
+            soccerRobot.leftSpeed  = 0.8 * MAX_SPEED
+            soccerRobot.rightSpeed = 0.6 * MAX_SPEED
+        else:
+            soccerRobot.leftSpeed  = 0.6 * MAX_SPEED
+            soccerRobot.rightSpeed = 0.8 * MAX_SPEED
+            
+        if soccerRobot.v_step >= 40:
+            soccerRobot.v_step = 0
+            print("BYPASS DONE → SEARCH")
+            state = "SEARCH"
+
+    # ---------------- ATTACK ----------------
+    elif state == "ATTACK":
+        if not soccerRobot.canSeeBall:
+            print("Lost ball → SEARCH")
+            state = "SEARCH"
+
+        else:
+            ball_x = soccerRobot.ballXPos
+
+            if ball_x < cam_width * 0.4:
+                soccerRobot.leftSpeed  = 0.5 * MAX_SPEED
+                soccerRobot.rightSpeed = MAX_SPEED
+
+            elif ball_x > cam_width * 0.6:
+                soccerRobot.leftSpeed  = MAX_SPEED
+                soccerRobot.rightSpeed = 0.5 * MAX_SPEED
+
+            else:
+                soccerRobot.leftSpeed  = MAX_SPEED
+                soccerRobot.rightSpeed = MAX_SPEED
+
+    # ---------------- APPLY ----------------
+    soccerRobot.setSpeed()
